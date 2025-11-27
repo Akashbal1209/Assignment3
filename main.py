@@ -1,116 +1,14 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
 import pandas as pd
 from datetime import datetime
-import requests
-import json
-import math
+import matplotlib.pyplot as plt
+import os
 
 class OptionsAnalyzer:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("NSE Options Trading Analyzer")
-        self.root.geometry("1400x800")
-        self.root.configure(bg="#f0f0f0")
-        
+    def __init__(self):
         self.analysis_data = []
+        self.margin_percent = 15  # Default margin percentage
+        self.lot_multiplier = 1   # Default lot multiplier
         
-        # Configure style
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        self.style.configure('Header.TLabel', font=('Arial', 16, 'bold'), foreground="#667eea")
-        self.style.configure('Config.TLabelframe', font=('Arial', 10, 'bold'))
-        self.style.configure('Action.TButton', font=('Arial', 10, 'bold'), padding=10)
-        
-        self.create_widgets()
-        
-    def create_widgets(self):
-        # Main container
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Title
-        title_label = ttk.Label(main_frame, text="📊 NSE Options Trading Analyzer", 
-                               style='Header.TLabel')
-        title_label.pack(pady=(0, 20))
-        
-        # Configuration Frame
-        config_frame = ttk.LabelFrame(main_frame, text="Configuration", 
-                                     style='Config.TLabelframe', padding="15")
-        config_frame.pack(fill=tk.X, pady=(0, 20))
-        
-        # Config Row 1
-        config_row1 = ttk.Frame(config_frame)
-        config_row1.pack(fill=tk.X, pady=5)
-        
-        ttk.Label(config_row1, text="Margin Percentage (%):").pack(side=tk.LEFT, padx=(0, 10))
-        self.margin_var = tk.StringVar(value="15")
-        margin_entry = ttk.Entry(config_row1, textvariable=self.margin_var, width=15)
-        margin_entry.pack(side=tk.LEFT, padx=(0, 30))
-        
-        ttk.Label(config_row1, text="Lot Size Multiplier:").pack(side=tk.LEFT, padx=(0, 10))
-        self.lot_multiplier_var = tk.StringVar(value="1")
-        lot_entry = ttk.Entry(config_row1, textvariable=self.lot_multiplier_var, width=15)
-        lot_entry.pack(side=tk.LEFT)
-        
-        # Buttons
-        button_frame = ttk.Frame(config_frame)
-        button_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        fetch_btn = ttk.Button(button_frame, text="🔍 Fetch & Analyze Options", 
-                              command=self.fetch_and_analyze, style='Action.TButton')
-        fetch_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        export_btn = ttk.Button(button_frame, text="📥 Export to Excel", 
-                               command=self.export_to_excel, style='Action.TButton')
-        export_btn.pack(side=tk.LEFT)
-        
-        # Status Label
-        self.status_label = ttk.Label(main_frame, text="", font=('Arial', 9))
-        self.status_label.pack(pady=(0, 10))
-        
-        # Results Frame with Scrollbar
-        results_frame = ttk.Frame(main_frame)
-        results_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create Treeview
-        columns = ('Symbol', 'Spot', '52W High', '52W Low', 'Percentile', 'Lot Size',
-                  'CE Strike', 'CE Premium', 'CE IRR', 'PE Strike', 'PE Premium', 'PE IRR')
-        
-        self.tree = ttk.Treeview(results_frame, columns=columns, show='headings', height=20)
-        
-        # Configure columns
-        column_widths = {
-            'Symbol': 100, 'Spot': 100, '52W High': 100, '52W Low': 100,
-            'Percentile': 90, 'Lot Size': 90, 'CE Strike': 90, 'CE Premium': 100,
-            'CE IRR': 90, 'PE Strike': 90, 'PE Premium': 100, 'PE IRR': 90
-        }
-        
-        for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=column_widths.get(col, 100), anchor=tk.CENTER)
-        
-        # Scrollbars
-        vsb = ttk.Scrollbar(results_frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(results_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        self.tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        
-        results_frame.grid_rowconfigure(0, weight=1)
-        results_frame.grid_columnconfigure(0, weight=1)
-        
-        # Configure row colors
-        self.tree.tag_configure('oddrow', background='#f9f9f9')
-        self.tree.tag_configure('evenrow', background='#ffffff')
-    
-    def show_status(self, message, is_error=False):
-        color = "red" if is_error else "green"
-        self.status_label.config(text=message, foreground=color)
-        self.root.update()
-    
     def calculate_percentile(self, current, high, low):
         if high == low:
             return 50.0
@@ -120,24 +18,16 @@ class OptionsAnalyzer:
         return round(price / strike_interval) * strike_interval
     
     def calculate_strike_with_margin(self, spot_price, margin_percent, is_call=True):
-        # First get the nearest strike to current spot price
         nearest_strike = self.find_nearest_strike(spot_price)
         
-        # Then apply margin to this nearest strike
         if is_call:
-            # For CE: 15% less means multiply by (1 - 0.15) = 0.85
             target_price = nearest_strike * (1 - margin_percent / 100)
         else:
-            # For PE: 15% more means multiply by (1 + 0.15) = 1.15
             target_price = nearest_strike * (1 + margin_percent / 100)
         
-        # Get nearest strike for the target price
         return self.find_nearest_strike(target_price)
     
     def generate_option_premium(self, spot_price, strike_price, option_type):
-        """Simplified premium calculation for demonstration"""
-        diff = abs(spot_price - strike_price)
-        
         if option_type == 'CE':
             if spot_price > strike_price:
                 base_premium = (spot_price - strike_price) + (spot_price * 0.02)
@@ -152,8 +42,7 @@ class OptionsAnalyzer:
         return round(base_premium, 2)
     
     def calculate_irr(self, premium, strike_price, days_to_expiry=30):
-        """Calculate Internal Rate of Return"""
-        margin_required = strike_price * 0.15  # 15% margin
+        margin_required = strike_price * 0.15
         if margin_required == 0:
             return 0
         irr = (premium / margin_required) * (365 / days_to_expiry) * 100
@@ -174,126 +63,240 @@ class OptionsAnalyzer:
             {'symbol': 'HINDUNILVR', 'spot_price': 2580, 'high_52w': 2800, 'low_52w': 2350, 'lot_size': 300}
         ]
     
-    def fetch_and_analyze(self):
-        try:
-            self.show_status("🔄 Analyzing options data...")
+    def analyze(self):
+        """Main analysis function"""
+        print("🔄 Starting Options Analysis...")
+        
+        # Get stock data
+        stocks = self.get_sample_data()
+        
+        for stock in stocks:
+            spot_price = stock['spot_price']
+            high_52w = stock['high_52w']
+            low_52w = stock['low_52w']
             
-            # Clear existing data
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-            self.analysis_data = []
+            # Calculate percentile
+            percentile = self.calculate_percentile(spot_price, high_52w, low_52w)
             
-            # Get configuration
-            margin_percent = float(self.margin_var.get())
-            lot_multiplier = int(self.lot_multiplier_var.get())
+            # Calculate strikes
+            ce_strike = self.calculate_strike_with_margin(spot_price, self.margin_percent, is_call=True)
+            pe_strike = self.calculate_strike_with_margin(spot_price, self.margin_percent, is_call=False)
             
-            # Get stock data (replace with actual API call)
-            stocks = self.get_sample_data()
+            # Generate premiums
+            ce_premium = self.generate_option_premium(spot_price, ce_strike, 'CE')
+            pe_premium = self.generate_option_premium(spot_price, pe_strike, 'PE')
             
-            for stock in stocks:
-                spot_price = stock['spot_price']
-                high_52w = stock['high_52w']
-                low_52w = stock['low_52w']
-                
-                # Calculate percentile
-                percentile = self.calculate_percentile(spot_price, high_52w, low_52w)
-                
-                # Calculate strikes
-                ce_strike = self.calculate_strike_with_margin(spot_price, margin_percent, is_call=True)
-                pe_strike = self.calculate_strike_with_margin(spot_price, margin_percent, is_call=False)
-                
-                # Generate premiums
-                ce_premium = self.generate_option_premium(spot_price, ce_strike, 'CE')
-                pe_premium = self.generate_option_premium(spot_price, pe_strike, 'PE')
-                
-                # Calculate IRR
-                ce_irr = self.calculate_irr(ce_premium, ce_strike)
-                pe_irr = self.calculate_irr(pe_premium, pe_strike)
-                
-                # Adjusted lot size
-                adjusted_lot_size = stock['lot_size'] * lot_multiplier
-                
-                # Store data
-                row_data = {
-                    'Symbol': stock['symbol'],
-                    'Spot Price': spot_price,
-                    '52W High': high_52w,
-                    '52W Low': low_52w,
-                    'Percentile': f"{percentile:.2f}",
-                    'Lot Size': adjusted_lot_size,
-                    'CE Strike': ce_strike,
-                    'CE Premium': ce_premium,
-                    'CE IRR': f"{ce_irr:.2f}",
-                    'PE Strike': pe_strike,
-                    'PE Premium': pe_premium,
-                    'PE IRR': f"{pe_irr:.2f}",
-                    'Margin Used': margin_percent
-                }
-                
-                self.analysis_data.append(row_data)
-                
-                # Insert into treeview
-                values = (
-                    stock['symbol'],
-                    f"₹{spot_price:.2f}",
-                    f"₹{high_52w:.2f}",
-                    f"₹{low_52w:.2f}",
-                    f"{percentile:.2f}%",
-                    adjusted_lot_size,
-                    f"₹{ce_strike}",
-                    f"₹{ce_premium}",
-                    f"{ce_irr:.2f}%",
-                    f"₹{pe_strike}",
-                    f"₹{pe_premium}",
-                    f"{pe_irr:.2f}%"
-                )
-                
-                tag = 'evenrow' if len(self.analysis_data) % 2 == 0 else 'oddrow'
-                self.tree.insert('', tk.END, values=values, tags=(tag,))
+            # Calculate IRR
+            ce_irr = self.calculate_irr(ce_premium, ce_strike)
+            pe_irr = self.calculate_irr(pe_premium, pe_strike)
             
-            self.show_status("✅ Analysis completed successfully!")
+            # Adjusted lot size
+            adjusted_lot_size = stock['lot_size'] * self.lot_multiplier
             
-        except ValueError as e:
-            self.show_status(f"⚠️ Invalid input: {str(e)}", is_error=True)
-            messagebox.showerror("Input Error", f"Please check your input values: {str(e)}")
-        except Exception as e:
-            self.show_status(f"❌ Error: {str(e)}", is_error=True)
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            # Store data
+            row_data = {
+                'Symbol': stock['symbol'],
+                'Spot Price': spot_price,
+                '52W High': high_52w,
+                '52W Low': low_52w,
+                'Percentile': round(percentile, 2),
+                'Lot Size': adjusted_lot_size,
+                'CE Strike': ce_strike,
+                'CE Premium': ce_premium,
+                'CE IRR': round(ce_irr, 2),
+                'PE Strike': pe_strike,
+                'PE Premium': pe_premium,
+                'PE IRR': round(pe_irr, 2),
+                'Margin Used (%)': self.margin_percent
+            }
+            
+            self.analysis_data.append(row_data)
+        
+        print(f"✅ Analysis completed for {len(self.analysis_data)} symbols!")
+        return self.analysis_data
     
-    def export_to_excel(self):
-        try:
-            if not self.analysis_data:
-                messagebox.showwarning("No Data", "Please analyze data before exporting!")
-                return
-            
-            # Create DataFrame
-            df = pd.DataFrame(self.analysis_data)
-            
-            # Generate filename with timestamp
+    def save_to_excel(self, filename=None):
+        """Save analysis to Excel file"""
+        if not self.analysis_data:
+            print("❌ No data to export. Run analyze() first.")
+            return
+        
+        # Create DataFrame
+        df = pd.DataFrame(self.analysis_data)
+        
+        # Generate filename if not provided
+        if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"Options_Analysis_{timestamp}.xlsx"
+        
+        # Export to Excel
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Options Analysis', index=False)
             
-            # Export to Excel
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Options Analysis', index=False)
-                
-                # Auto-adjust column widths
-                worksheet = writer.sheets['Options Analysis']
-                for idx, col in enumerate(df.columns):
-                    max_length = max(df[col].astype(str).apply(len).max(), len(col)) + 2
-                    worksheet.column_dimensions[chr(65 + idx)].width = max_length
-            
-            self.show_status(f"✅ Excel file exported: {filename}")
-            messagebox.showinfo("Success", f"Data exported successfully to:\n{filename}")
-            
-        except Exception as e:
-            self.show_status(f"❌ Export failed: {str(e)}", is_error=True)
-            messagebox.showerror("Export Error", f"Failed to export: {str(e)}")
+            # Auto-adjust column widths
+            worksheet = writer.sheets['Options Analysis']
+            for idx, col in enumerate(df.columns):
+                max_length = max(df[col].astype(str).apply(len).max(), len(col)) + 2
+                worksheet.column_dimensions[chr(65 + idx)].width = min(max_length, 20)
+        
+        print(f"✅ Excel file saved: {filename}")
+        return filename
+    
+    def save_graphs(self, filename=None):
+        """Generate and save all graphs"""
+        if not self.analysis_data:
+            print("❌ No data to plot. Run analyze() first.")
+            return
+        
+        print("📊 Generating graphs...")
+        
+        # Create DataFrame
+        df = pd.DataFrame(self.analysis_data)
+        
+        # Generate filename if not provided
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"Options_Analysis_Graphs_{timestamp}.png"
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+        fig.suptitle('NSE Options Trading Analysis Dashboard', fontsize=18, fontweight='bold', y=0.995)
+        
+        x = range(len(df))
+        width = 0.35
+        
+        # 1. IRR Comparison (CE vs PE)
+        ax1 = axes[0, 0]
+        ax1.bar([i - width/2 for i in x], df['CE IRR'], width, label='CE IRR', color='#667eea', alpha=0.8)
+        ax1.bar([i + width/2 for i in x], df['PE IRR'], width, label='PE IRR', color='#f093fb', alpha=0.8)
+        ax1.set_xlabel('Symbol', fontsize=10, fontweight='bold')
+        ax1.set_ylabel('IRR (%)', fontsize=10, fontweight='bold')
+        ax1.set_title('Call vs Put IRR Comparison', fontsize=12, fontweight='bold')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(df['Symbol'], rotation=45, ha='right', fontsize=9)
+        ax1.legend(fontsize=9)
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Premium Comparison
+        ax2 = axes[0, 1]
+        ax2.bar([i - width/2 for i in x], df['CE Premium'], width, label='CE Premium', color='#4facfe', alpha=0.8)
+        ax2.bar([i + width/2 for i in x], df['PE Premium'], width, label='PE Premium', color='#00f2fe', alpha=0.8)
+        ax2.set_xlabel('Symbol', fontsize=10, fontweight='bold')
+        ax2.set_ylabel('Premium (₹)', fontsize=10, fontweight='bold')
+        ax2.set_title('Call vs Put Premium Comparison', fontsize=12, fontweight='bold')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(df['Symbol'], rotation=45, ha='right', fontsize=9)
+        ax2.legend(fontsize=9)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. 52-Week Percentile
+        ax3 = axes[0, 2]
+        colors = ['#43e97b' if p >= 50 else '#fa709a' for p in df['Percentile']]
+        bars = ax3.barh(df['Symbol'], df['Percentile'], color=colors, alpha=0.8)
+        ax3.set_xlabel('Percentile (%)', fontsize=10, fontweight='bold')
+        ax3.set_title('52-Week Price Percentile', fontsize=12, fontweight='bold')
+        ax3.axvline(x=50, color='red', linestyle='--', linewidth=2, label='50% Mark')
+        ax3.legend(fontsize=9)
+        ax3.grid(True, alpha=0.3, axis='x')
+        
+        # Add value labels
+        for i, bar in enumerate(bars):
+            width_val = bar.get_width()
+            ax3.text(width_val + 1, bar.get_y() + bar.get_height()/2, 
+                    f'{width_val:.1f}%', va='center', fontsize=8)
+        
+        # 4. Spot Price vs Strikes
+        ax4 = axes[1, 0]
+        ax4.plot(df['Symbol'], df['Spot Price'], marker='o', label='Spot Price', 
+                linewidth=2.5, markersize=8, color='#667eea')
+        ax4.plot(df['Symbol'], df['CE Strike'], marker='s', label='CE Strike', 
+                linewidth=2, markersize=6, color='#4facfe', linestyle='--')
+        ax4.plot(df['Symbol'], df['PE Strike'], marker='^', label='PE Strike', 
+                linewidth=2, markersize=6, color='#f093fb', linestyle='--')
+        ax4.set_xlabel('Symbol', fontsize=10, fontweight='bold')
+        ax4.set_ylabel('Price (₹)', fontsize=10, fontweight='bold')
+        ax4.set_title('Spot Price vs Strike Prices', fontsize=12, fontweight='bold')
+        ax4.legend(fontsize=9)
+        ax4.grid(True, alpha=0.3)
+        plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+        
+        # 5. Average IRR by Type
+        ax5 = axes[1, 1]
+        avg_ce_irr = df['CE IRR'].mean()
+        avg_pe_irr = df['PE IRR'].mean()
+        bars = ax5.bar(['Call Options', 'Put Options'], [avg_ce_irr, avg_pe_irr], 
+               color=['#667eea', '#f093fb'], alpha=0.8, width=0.6)
+        ax5.set_ylabel('Average IRR (%)', fontsize=10, fontweight='bold')
+        ax5.set_title('Average IRR Comparison', fontsize=12, fontweight='bold')
+        ax5.grid(True, alpha=0.3, axis='y')
+        
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            ax5.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                    f'{height:.2f}%', ha='center', va='bottom', fontweight='bold', fontsize=10)
+        
+        # 6. Premium to Strike Ratio
+        ax6 = axes[1, 2]
+        df['CE_Ratio'] = (df['CE Premium'] / df['CE Strike']) * 100
+        df['PE_Ratio'] = (df['PE Premium'] / df['PE Strike']) * 100
+        ax6.scatter(df['Symbol'], df['CE_Ratio'], s=120, alpha=0.7, 
+                   label='CE Ratio', color='#667eea', edgecolors='black', linewidth=0.5)
+        ax6.scatter(df['Symbol'], df['PE_Ratio'], s=120, alpha=0.7, 
+                   label='PE Ratio', color='#f093fb', edgecolors='black', linewidth=0.5)
+        ax6.set_xlabel('Symbol', fontsize=10, fontweight='bold')
+        ax6.set_ylabel('Premium/Strike Ratio (%)', fontsize=10, fontweight='bold')
+        ax6.set_title('Premium to Strike Price Ratio', fontsize=12, fontweight='bold')
+        ax6.legend(fontsize=9)
+        ax6.grid(True, alpha=0.3)
+        plt.setp(ax6.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+        
+        plt.tight_layout()
+        
+        # Save to file
+        fig.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close(fig)
+        
+        print(f"✅ Graphs saved: {filename}")
+        return filename
+    
+    def run(self, margin_percent=15, lot_multiplier=1):
+        """Run complete analysis and save outputs"""
+        print("\n" + "="*60)
+        print("🚀 NSE OPTIONS TRADING ANALYZER")
+        print("="*60)
+        
+        # Set parameters
+        self.margin_percent = margin_percent
+        self.lot_multiplier = lot_multiplier
+        
+        print(f"\n⚙️  Configuration:")
+        print(f"   - Margin Percentage: {margin_percent}%")
+        print(f"   - Lot Size Multiplier: {lot_multiplier}x")
+        print()
+        
+        # Run analysis
+        self.analyze()
+        
+        # Save to Excel
+        excel_file = self.save_to_excel()
+        
+        # Save graphs
+        graph_file = self.save_graphs()
+        
+        print("\n" + "="*60)
+        print("✨ ANALYSIS COMPLETE!")
+        print("="*60)
+        print(f"📄 Excel Report: {excel_file}")
+        print(f"📊 Graphs: {graph_file}")
+        print("="*60 + "\n")
+        
+        return excel_file, graph_file
 
-def main():
-    root = tk.Tk()
-    app = OptionsAnalyzer(root)
-    root.mainloop()
 
+# Main execution
 if __name__ == "__main__":
-    main()
+    analyzer = OptionsAnalyzer()
+    
+    analyzer.run(margin_percent=15, lot_multiplier=1)
+
